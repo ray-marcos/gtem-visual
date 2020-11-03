@@ -1,5 +1,6 @@
 
-
+# This code generates graphs to compare price and outputs projections for selected commodities
+# It relies on data from GLOBIOM, ANO 2019, and FAOSTAT.
 
 # Required packages
 x = c("forecast", "data.table", "lubridate", "ggplot2", "ggthemes",  "gridExtra", "cowplot")
@@ -28,9 +29,6 @@ nat_first = nat_first[nat_first$Regions == "AustraliaReg",]
 worktog = read.csv("C:/Users/mar77v/Dropbox/Australia/GLOBIOM/latest_results/TwoDegrees/IIASA_GLOBIOM_emulator_interpolated_output 1990-2100.csv")
 worktog = worktog[worktog$Regions == "AustraliaReg",]
 # worktog[,5:14] = NULL
-
-
-
 
 
 #----------------------------------------------------------------------------------------------------
