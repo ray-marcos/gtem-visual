@@ -2,33 +2,165 @@
 
 
 # Required packages
-x = c("forecast", "data.table", "lubridate", "ggplot2", "ggthemes",  "gridExtra", "cowplot")
+x = c("forecast", "data.table", "lubridate", "ggplot2", "ggthemes",  "gridExtra", "cowplot", "dplyr",
+      "matrixStats")
 lapply(x, library, character.only = TRUE);
-# ,
+
 
 # Set the working directory
 setwd("C:/Users/mar77v/CSIRO/ABARES CSIRO Modeling - Visualization/V July_27_2017")
 
-# Load the FAOSTAT data
 
-# lu = read.csv("FAOSTAT_data_5-3-2017 Yield Area.csv")
-# # Extract the ANZ  data
-# ANZ_Pn_FAO = lu[lu["Area"]== "Australia & New Zealand",]
 
-# load the GLOBIOM data
+# lGLOBIOM data
 # The script can also run SSP1 
 # ssp_lu = read.csv("SSP1_LU_Template.csv", stringsAsFactors = F)
-ssp_lu = read.csv("SSP2_LU_Template.csv", stringsAsFactors = F)
+# Aggregated data
+# ssp_lu = read.csv("SSP2_LU_Template.csv", stringsAsFactors = F)
+ssp_lu = read.csv("globiom_output_SSP2_03072017_v2.csv", stringsAsFactors = F)
 regs = unique(ssp_lu$Region)
-lu = unique(ssp_lu$Land.type)
+lu = unique(ssp_lu$lu)
+
+region = "World"
+# Replace NA with zeros
+ssp_lu[is.na(ssp_lu)] = 0
+# production
+
+pn = ssp_lu %>%
+        filter(Region  == region) %>%
+        filter(unit == "1000 t" ) %>%
+        group_by(lu) %>%
+        summarise_if(is.numeric, sum, na.rm = TRUE) %>%
+        arrange(desc(lu))
+
+pn[pn == 0] = NA
+
+# Prices
+#
+# THIS PRICES NEED TO BE UPDATED TO THE SAME BASE AS GTEM
+CHeck that projections afte 2040 are included. 
+prices = ssp_lu %>%
+        filter(Region  == region) %>%
+        filter(variable == "XPRP" ) %>%
+        filter(unit == "USD 2000 per ton") %>%
+        group_by(lu) %>%
+        summarise_if(is.numeric, sum, na.rm = TRUE) %>%
+        arrange(desc(lu))
+
+prices[prices == 0] = NA
+
+
+
+# ANO data
 
 nat_first = read.csv("C:/Users/mar77v/Dropbox/Australia/GLOBIOM/latest_results/FourDegrees/IIASA_GLOBIOM_emulator_interpolated_output 1990-2100.csv")
-nat_first = nat_first[nat_first$Regions == "AustraliaReg",]
-# nat_first[,5:14] = NULL
-worktog = read.csv("C:/Users/mar77v/Dropbox/Australia/GLOBIOM/latest_results/TwoDegrees/IIASA_GLOBIOM_emulator_interpolated_output 1990-2100.csv")
-worktog = worktog[worktog$Regions == "AustraliaReg",]
-# worktog[,5:14] = NULL
+# nat_first = nat_first[nat_first$Regions == "AustraliaReg",]
 
+worktog = read.csv("C:/Users/mar77v/Dropbox/Australia/GLOBIOM/latest_results/TwoDegrees/IIASA_GLOBIOM_emulator_interpolated_output 1990-2100.csv")
+# worktog = worktog[worktog$Regions == "AustraliaReg",]
+
+# Aggregate data to report global trends
+nat_first_pn <- nat_first %>%
+        filter(ParameterType == "PROD") %>%
+        group_by(ParameterName) %>%
+        summarise_if(is.numeric, sum, na.rm = TRUE) %>%
+        arrange(desc(ParameterName))
+
+nat_first_pric <- nat_first %>%
+        filter(ParameterType == "XPRP") %>%
+        group_by(ParameterName) %>%
+        summarise_if(is.numeric, mean, na.rm = TRUE) %>%
+        arrange(desc(ParameterName))
+
+worktog_pn <- worktog %>%
+        filter(ParameterType == "PROD") %>%
+        group_by(ParameterName) %>%
+        summarise_if(is.numeric, sum, na.rm = TRUE) %>%
+        arrange(desc(ParameterName))
+
+worktog_pric <- worktog %>%
+        filter(ParameterType == "XPRP") %>%
+        group_by(ParameterName) %>%
+        summarise_if(is.numeric, mean, na.rm = TRUE) %>%
+        arrange(desc(ParameterName))
+
+
+# Historical data
+
+# FAOSTAT producers price data
+histpric = read.csv("Prices_E_All_Data_NOFLAG.csv")
+# Select annual PP data in USD and estimate global mean values 
+histpric<- histpric %>%
+        filter(Element == "Producer Price (USD/tonne)") %>%
+        filter(Months == "Annual value") %>%
+        group_by(Item) %>%
+        summarise_if(is.numeric, mean, na.rm = TRUE) %>%
+        arrange(desc(Item))
+
+histpric[is.na(histpric)] = 0
+
+# Transform data to real prices
+
+def = read.csv("US GDP deflator.csv", stringsAsFactors = F)
+
+t1 = c("Y1991","Y1992", "Y1993","Y1994","Y1995","Y1996", 
+       "Y1997","Y1998","Y1999","Y2000","Y2001","Y2002","Y2003","Y2004", "Y2005","Y2006","Y2007",
+       "Y2008", "Y2009","Y2010","Y2011","Y2012","Y2013","Y2014","Y2015","Y2016", "Y2017", "Y2018" )
+
+t2 = c(1991:2018)
+
+histpric.def = histpric
+
+for(j in 1:dim(histpric)[1]){
+        
+        histpric.def[j, 6:33] =  histpric[j, 6:33] / def[def$Year >= 1991, "GDP_def_2005"]
+
+}
+
+
+# FAOSTAT production
+histcrop = read.csv("Production_Crops_E_All_Data_NOFLAG.csv")
+
+histcrop<- histcrop %>%
+        filter(Element == "Production") %>%
+        group_by(Item) %>%
+        summarise_if(is.numeric, mean, na.rm = TRUE) %>%
+        arrange(desc(Item))
+
+
+histliv = read.csv("Production_LivestockPrimary_E_All_Data_NOFLAG.csv")
+
+histliv<- histliv %>%
+        filter(Element == "Production") %>%
+        group_by(Item) %>%
+        summarise_if(is.numeric, mean, na.rm = TRUE) %>%
+        arrange(desc(Item))
+
+
+# prices = read.csv("pricesSSP2.csv", stringsAsFactors = F)
+# pn = read.csv("productionSSP2.csv", stringsAsFactors = F)
+# area = read.csv("surfaceSSP2.csv", stringsAsFactors = F)
+# 
+# 
+# # Aggregate price data
+# pric_ag<- prices %>%
+#         group_by(lu) %>%
+#         summarise_if(is.numeric, mean, na.rm = TRUE) %>%
+#         arrange(desc(lu))
+# 
+# 
+# histpric = read.csv("historical prices.csv", stringsAsFactors = F)
+# rownames(histpric) = unlist(histpric$crop); histpric$crop = NULL
+# histpn = read.csv("historical_production.csv", stringsAsFactors = F)
+# rownames(histpn) = unlist(histpn$crop); histpn$crop = NULL
+# histarea = read.csv("historical_surface.csv", stringsAsFactors = F)
+# rownames(histarea) = unlist(histarea$crop); histarea$crop = NULL
+
+
+# GTEM
+
+gtem.prices = read.csv("prices_adj_AU_annual.csv")
+gtem.output = read.csv("global.output.csv")
 
 
 
@@ -37,27 +169,12 @@ worktog = worktog[worktog$Regions == "AustraliaReg",]
 # Meat and crop projections
 #----------------------------------------------------------------------------------------------------
 
-prices = read.csv("pricesSSP2.csv", stringsAsFactors = F)
-pn = read.csv("productionSSP2.csv", stringsAsFactors = F)
-area = read.csv("surfaceSSP2.csv", stringsAsFactors = F)
-
-histpric = read.csv("historical prices.csv", stringsAsFactors = F)
-rownames(histpric) = unlist(histpric$crop); histpric$crop = NULL
-histpn = read.csv("historical_production.csv", stringsAsFactors = F)
-rownames(histpn) = unlist(histpn$crop); histpn$crop = NULL
-histarea = read.csv("historical_surface.csv", stringsAsFactors = F)
-rownames(histarea) = unlist(histarea$crop); histarea$crop = NULL
-
-# GTEM
-
-gtem.prices = read.csv("prices_adj_AU_annual.csv")
-gtem.output = read.csv("sector output AU physical.csv")
 
 #------------------------------------------------------------------------
 # Meat production
 #------------------------------------------------------------------------
 
-tiff("meat & dairy GTEM.tiff", compression = "lzw", res = 500, width = 160, height = 160, units = "mm")
+tiff("meat & dairy GTEM global.tiff", compression = "lzw", res = 500, width = 160, height = 160, units = "mm")
 
 par(mfrow=c(3,3), cex = 0.6)
 
@@ -65,14 +182,15 @@ par(mfrow=c(3,3), cex = 0.6)
 # Beef production
 
 fmat = t(as.matrix(pn[pn$lu == "BVMEAT",]))
-colnames(fmat) = fmat["ghg",]
+# colnames(fmat) = fmat["ghg",]
+fmat.rep = as.numeric(as.character(fmat))
 
-# Get mean value
-fmat.rep = (as.data.frame(fmat[4:74, 1:96]))
-# Convert character data to numeric
-fmat.rep[] <- lapply(fmat.rep, function(x) as.numeric(as.character(x)))
-# fmat.rep = rowMeans(fmat.rep, na.rm = T)
-fmat.rep = rowMedians(as.matrix(fmat.rep))
+# # Get mean value
+# fmat.rep = (as.data.frame(fmat[4:74, 1:96]))
+# # Convert character data to numeric
+# fmat.rep[] <- lapply(fmat.rep, function(x) as.numeric(as.character(x)))
+# # fmat.rep = rowMeans(fmat.rep, na.rm = T)
+# fmat.rep = rowMedians(as.matrix(fmat.rep))
 
 par(mar = c(4,4,1,0))
 # matplot(fmat[4:74, 1:96], type = "l", ylab = " ",  xlab = " ",
@@ -81,7 +199,7 @@ par(mar = c(4,4,1,0))
 #              col = "#72CC98", axes = F, ylim=c(0,3000))
 
 plot(fmat.rep, type = "l", ylab = " ",  xlab = " ",
-     col = "#72CC98", axes = F, ylim=c(0,3000),  lwd = 2)
+     col = "#72CC98", axes = F,  lwd = 2)
 
 axis(1, at = seq(0,71,10), labels = seq(1990,2060,10), cex.axis = 0.7)
 axis(2, at = seq(0,3000,500), labels = seq(0,3000,500), cex.axis = 0.7)
