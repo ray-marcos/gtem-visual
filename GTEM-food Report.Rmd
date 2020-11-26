@@ -9,22 +9,528 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Intro
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+The Global Trade and Environmental Model (GTEM) is a dynamic global general equilibrium model with the capability to address total, sectoral, spatial, and temporal efficiency of resource allocation. GTEM captures the impact of policy changes on large numbers of economic variables in all sectors of the economy, including gross domestic product, prices, consumption, production, trade, investment, efficiency, competitiveness, and greenhouse gases. GTEM has been used to analyse a range of issues such as the climate mitigation policies under the Kyoto Protocol and Paris Agreement, trade reform under the World Trade Organisation, and trends and issues in international commodity and energy markets.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+We are developing an extended version of GTEM (GTEM-Food) with an updated and disaggregated agricultural sector to better explore the intersection of socioeconomic and biophysical modelling of the agriculture, land, and food sectors within global and national contexts.
 
-```{r cars}
-summary(cars)
+This document includes a subset of plots for quick inspection of preliminary results. **The information corresponds to estimates for the Australian region**.
+
+```{r include=FALSE}
+
+# This code generates graphs to compare price and outputs projections for selected commodities
+# It relies on data from GLOBIOM, ANO 2019, and FAOSTAT.
+
+# Required packages
+x = c("forecast", "data.table", "lubridate", "ggplot2", "ggthemes",  "gridExtra", 
+      "cowplot", "plotly", "matrixStats")
+lapply(x, library, character.only = TRUE);
+
+
+
+# -------------------------------------------------------------------------------------------
+# Data preparation
+# -------------------------------------------------------------------------------------------
+# Clear workspace
+rm(list=ls())
+
+x =  c("readxl", "data.table")
+
+lapply(x, library, character.only = TRUE);
+
+# old data
+# setwd("C:/Users/mar77v/CSIRO/ABARES CSIRO Modeling - Visualization/gtem-visual") 
+
+# Data Nov 19
+setwd("C:/Users/mar77v/CSIRO/ABARES CSIRO Modeling - Visualization/results_nov") 
+
+# -----------------------------------------------------------------------------
+# Select country data and transpose it
+regionID = "1 Australia"
+regANO ="AustraliaReg" # ID in ANO scenarios - Globiom
+price_output_ID = 2 
+#-----------------------------------------------------------------------------
+
+
+
+
+# Import data from excel files
+
+read_excel_allsheets <- function(filename, tibble = FALSE) {
+        # I prefer straight data.frames
+        # but if you like tidyverse tibbles (the default with read_excel)
+        # then just pass tibble = TRUE
+        sheets <- readxl::excel_sheets(filename)
+        x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
+        if(!tibble) x <- lapply(x, as.data.frame)
+        names(x) <- sheets
+        x
+}
+
+prices_gtem = read_excel_allsheets("sector price index.xlsx")
+
+
+
+# Prices
+
+
+# Select region specific data.
+
+# column number
+prices = as.data.frame(prices_gtem[1])[, c(1, price_output_ID)]
+
+# Concatenate all the periods
+
+for(j in 2:length(prices_gtem)){
+        print(j)
+        prices = cbind(prices, as.data.frame(prices_gtem[j])[,price_output_ID]) 
+}
+
+colnames(prices) = c("item", seq(2015,2060,5))
+
+# Adjust data for inflation using CPI
+
+cpi = read.csv("CPI.csv")
+
+# Adjust the data based on phone chat with YL
+cpi[,2:dim(cpi)[2]] =  (cpi[,2:dim(cpi)[2]] - 1) * 100
+
+
+# select five-year data
+# cpi5y = subset(cpi, select = c("L_CPI", "X2.year2015", "X7.year2020", 
+#                                 "X12.year2025", "X17.year2030",
+#                                 "X22.year2035", "X27.year2040", 
+#                                 "X32.year2045", "X37.year2050", 
+#                                 "X42.year2055", "X47.year2060"))
+
+# select five-year data
+cpi5y = subset(cpi, select = c("L_CPI", "X2015", "X2020", 
+                               "X2025", "X2030",
+                               "X2035", "X2040", 
+                               "X2045", "X2050", 
+                               "X2055", "X2060"))
+
+cpi_region = cpi5y[cpi5y$L_CPI == regionID, ]
+# make the data the same lenght as the price index data
+cpi_region = cpi_region[rep(row.names(cpi_region), 
+                            dim(prices)[1]),]
+
+# remove inflation values from price index
+
+prices.adj = prices
+prices.adj[,2:dim(prices)[2]] =  prices.adj[,2:dim(prices)[2]] - cpi_region[,2:dim(cpi_region)[2]]
+
+# Add 100 indicator to prices
+prices.adj[,2:dim(prices)[2]]  = prices.adj[,2:dim(prices)[2]]  + 100
+
+# Interpolate the data to generate a yearly dataset
+
+## First, transform data from wide -> long format, clean year column
+# or use reshape2::melt
+prices.adj <- melt(as.data.table( prices.adj), id.vars='item', variable.name='year')  # wide -> long
+prices.adj[, year := as.integer(sub('[[:alpha:]]', '', year))]                      # convert years to integers
+
+## Function to interpolate at constant rate for each interval
+interp <- function(yrs, values) {
+        tt <- diff(yrs)               # interval lengths
+        N <- head(values, -1L)     
+        P <- tail(values, -1L)
+        r <- (log(P) - log(N)) / tt   # rate for interval
+        const_rate <- function(N, r, time) N*exp(r*(0:(time-1L)))
+        list(year=seq.int(min(yrs), max(yrs), by=1L),
+             value=c(unlist(Map(const_rate, N, r, tt)), tail(P, 1L)))
+}
+
+# The geometric interpolation does not work if there are neg vals
+
+## geometric interpolation for each item
+gtem.prices <- prices.adj[, interp(year, value), by= item]
+
+# ## Plot
+
+ggplot(gtem.prices, aes(year, value, color=item)) +
+        geom_line(lwd=1) + theme_bw() 
+
+chart.prices = ggplotly(
+        p = ggplot2::last_plot(),
+        width = NULL,
+        height = NULL,
+        tooltip = "all",
+        dynamicTicks = FALSE,
+        layerData = 1,
+        originalData = TRUE,
+        source = "A",
+)
+
+
+# Output
+
+
+output.A = read_excel_allsheets("sector output index.xlsx")
+
+# Select AU data. Note for other countries we need to indicate the corresponding
+# column number
+output = as.data.frame(output.A[1])[,c(1, price_output_ID )]
+# Concatenate all the periods
+
+for(j in 2:length( output.A)){
+        # print(j)
+        output = cbind(output, as.data.frame(output.A[j])[,price_output_ID]) 
+}
+
+colnames(output) = c("item", seq(2015,2060,5))
+
+# Add 100 to be able to interpolate
+output[, 2: dim(output)[2]] = output[, 2: dim(output)[2]] +100
+
+# FTransform data from wide -> long format, clean year column
+# or use reshape2::melt
+output.adj <- melt(as.data.table( output), id.vars='item', variable.name='year')  # wide -> long
+output.adj[, year := as.integer(sub('[[:alpha:]]', '', year))]                      # convert years to integers
+
+
+## geometric interpolation for each item
+gtem.output <- output.adj[, interp(year, value), by= item]
+
+# ## Plot
+
+p.output = ggplot(gtem.output, aes(year, value, color=item)) +
+        geom_line(lwd=1) + theme_cowplot() 
+chart.output = ggplotly(
+        p = p.output,
+        width = NULL,
+        height = NULL,
+        tooltip = "all",
+        dynamicTicks = FALSE,
+        layerData = 1,
+        originalData = TRUE,
+        source = "A",
+)
+
+
+
+# write.csv(output, "sector output AU.csv")
+
+
 ```
 
-## Including Plots
+### Projections output and price indices
 
-You can also embed plots, for example:
+The following plots are interactive. If you double click in one of the labels projections associated with the other labels will not be shown. You can then click one time in other labels to add them to the chart. Double click in any label to add all the lines.
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+***Price indices projections***
+
+
+```{r chart.prices, echo=FALSE}
+chart.prices
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+### Output indices projections
+
+**Output indices projections**
+
+```{r chart.output, echo=FALSE}
+chart.output
+
+```
+
+
+
+```{r include=FALSE}
+# -------------------------------------------------------------------------------------------
+# Visualization
+# -------------------------------------------------------------------------------------------
+
+# Set the working directory
+
+setwd("C:/Users/mar77v/CSIRO/ABARES CSIRO Modeling - Visualization/V July_27_2017")
+
+# Load the FAOSTAT data
+
+# lu = read.csv("FAOSTAT_data_5-3-2017 Yield Area.csv")
+# # Extract the ANZ  data
+# ANZ_Pn_FAO = lu[lu["Area"]== "Australia & New Zealand",]
+
+# load the GLOBIOM data
+# The script can also run SSP1
+# ssp_lu = read.csv("SSP1_LU_Template.csv", stringsAsFactors = F)
+ssp_lu = read.csv("SSP2_LU_Template.csv", stringsAsFactors = F)
+regs = unique(ssp_lu$Region)
+lu = unique(ssp_lu$Land.type)
+
+nat_first = read.csv("C:/Users/mar77v/Dropbox/Australia/GLOBIOM/latest_results/FourDegrees/IIASA_GLOBIOM_emulator_interpolated_output 1990-2100.csv")
+# nat_first = read.csv("F:/Dropbox/Australia/GLOBIOM/latest_results/FourDegrees/IIASA_GLOBIOM_emulator_interpolated_output 1990-2100.csv")
+
+nat_first = nat_first[nat_first$Regions == regANO,]
+
+# nat_first[,5:14] = NULL
+worktog = read.csv("C:/Users/mar77v/Dropbox/Australia/GLOBIOM/latest_results/TwoDegrees/IIASA_GLOBIOM_emulator_interpolated_output 1990-2100.csv")
+# worktog = read.csv("F:/Dropbox/Australia/GLOBIOM/latest_results/TwoDegrees/IIASA_GLOBIOM_emulator_interpolated_output 1990-2100.csv")
+
+
+worktog = worktog[worktog$Regions == regANO,]
+# worktog[,5:14] = NULL
+
+
+#----------------------------------------------------------------------------------------------------
+# Meat and crop projections
+#----------------------------------------------------------------------------------------------------
+
+prices = read.csv("pricesSSP2.csv", stringsAsFactors = F)
+pn = read.csv("productionSSP2.csv", stringsAsFactors = F)
+area = read.csv("surfaceSSP2.csv", stringsAsFactors = F)
+
+histpric = read.csv("historical prices.csv", stringsAsFactors = F)
+rownames(histpric) = unlist(histpric$crop); histpric$crop = NULL
+histpn = read.csv("historical_production.csv", stringsAsFactors = F)
+rownames(histpn) = unlist(histpn$crop); histpn$crop = NULL
+histarea = read.csv("historical_surface.csv", stringsAsFactors = F)
+rownames(histarea) = unlist(histarea$crop); histarea$crop = NULL
+
+
+
+#------------------------------------------------------------------------
+# Meat production
+#------------------------------------------------------------------------
+
+tiff("meat & dairy GTEM.tiff", compression = "lzw", res = 500, width = 160, height = 160, units = "mm")
+
+par(mfrow=c(3,3), cex = 0.6)
+
+#------------------------------------------------------------------------
+
+# Function to plot GTEM, Globiom, ANO2 , and historical projections
+
+gtem.Pn.chart <- function(comID.ANO, comID.hist, comID.GTEM, sm.factor){
+
+  # Globiom
+
+  globiom = t(as.matrix(pn[pn$lu == comID.ANO,]))
+  colnames(globiom) = globiom["ghg",] # name of multiple GLOBIOM projections
+
+  # Get median value over SSP2 projections from GLOBIOM data
+  globiom.rep = (as.data.frame(globiom[4:74, 1:96]))
+  # Convert character data to numeric
+  globiom.rep[] <- lapply(globiom.rep, function(x) as.numeric(as.character(x)))
+  # globiom.rep = rowMeans(globiom.rep, na.rm = T)
+  globiom.rep = rowMedians(as.matrix(globiom.rep))
+
+  #WT
+  wt_meat = worktog[worktog$ParameterName == comID.ANO,]
+  wt_meat_pn = as.numeric(wt_meat[wt_meat$ParameterType == "PROD", 5:75])
+  # lines(wt_meat_pn, col = "#6666FF", lty = 1, lwd = 2 )
+  # NF
+  nf_meat = nat_first[nat_first$ParameterName == comID.ANO,]
+  nf_meat_pn = as.numeric(nf_meat[nf_meat$ParameterType == "PROD", 5:75])
+
+  # GTEM
+  getm.com = gtem.output[gtem.output$item == comID.GTEM,]
+  tmp =  as.data.frame(c(rep(NA, 2015-1990), getm.com$value))
+  # Multiply the index by the average of historical FAOSTAT data
+  base.com = mean(as.numeric(histpn[comID.hist, c("X2010", "X2011","X2012", "X2013", "X2014")]))
+  # tmp$year = 1990:2060
+  gtem.proj.pn = base.com * tmp/100
+  colnames(gtem.proj.pn) = "GTEM"
+  gtem.proj.pn[25,1] = base.com
+
+
+  # Add historical trend analysis
+
+  jf = sm.factor
+  #Smoothen the time series data to improve the analysis of long term trends
+  sm = lowess(x =  1990:2014, y = as.numeric(histpn[comID.hist,1:25]), f = jf)
+  # Format data as time series
+  ax = ts(sm$y, start = 1990, end = 2014, frequency = 1)
+  # Fit a ETS model to the time series
+  ax.fit = ets(ax, damped = T)
+  # Project using the fitted model
+  ax.proj = as.data.frame(forecast.ets(ax.fit, h = 46))
+
+  # merge historical and projected data
+
+  tF = 2060 # Final year
+  tI = 2014 # initial year
+
+  # save the  point forecasts, bounds and fitted data
+  t = tF - 1990 + 1
+  df_shares = data.frame(matrix(vector(), t , 8))
+  colnames(df_shares) =c("historical", "fitted", "LB80", "LB95", "trend", "UB80", "UB95", "year")
+  df_shares["year"] = 1990:tF
+  df_shares[1:(t - (tF-tI)),"historical"] = as.numeric(histpn[comID.hist,1:25])
+  df_shares[1:(t - (tF-tI)),"fitted"] = as.numeric(fitted(ax.fit) )
+  df_shares[(t - (tF - tI) + 1):t,"LB80"] = as.numeric(ax.proj[,"Lo 80"])
+  df_shares[(t - (tF - tI) + 1):t,"LB95"] = as.numeric(ax.proj[,"Lo 95"])
+  df_shares[(t - (tF - tI ) + 1):t,"trend"] = as.numeric( ax.proj[,"Point Forecast"])
+  df_shares[(t - (tF - tI ) + 1):t,"UB80"] = as.numeric( ax.proj[,"Hi 80"])
+  df_shares[(t - (tF - tI ) + 1):t,"UB95"] = as.numeric( ax.proj[,"Hi 95"])
+
+  df_shares[df_shares < 0] = 0
+
+  # Add the 2014 data to the projections to avoid a visual "gap"
+  df_shares[(t - (tF - tI )), 3:7] =  as.numeric(df_shares[(t - (tF - tI )), 2])
+
+  # Add ANO and globiom projections to the data
+  df_shares$WT = wt_meat_pn
+  df_shares$NF = nf_meat_pn
+  df_shares$GTEM = gtem.proj.pn$GTEM
+  df_shares$GLOBIOM = globiom.rep
+
+  # map colors to create separate legends
+  colores <- c("historical"="black","fitted"="grey80","trend"="grey40",
+               "95% C.I." = "#FFE5E5", "80% C.I." = "#E5CEE8",
+               "Working Together" = "#1f78b4",
+               "Nations First" = "#ff7f00",
+               "GLOBIOM" = "#b2df8a",
+               "GTEM-Food" = "#c51b8a")
+  cis <- c("80% C.I."="blue","95% C.I."="red")
+
+  # Plot
+  comPlot = ggplot(data=df_shares, aes(x=year)) +
+    geom_line(aes(y=historical, color = "historical"), size = 0.8) +
+    scale_x_continuous(breaks=c(seq(1990,tF, 10))) +
+    scale_y_continuous(labels=function(x) format(x, big.mark = ",", scientific = FALSE)) +
+    geom_line(aes(y = fitted, color = "fitted"), size = 0.8, linetype = "dashed") +
+    #geom_ribbon(aes(ymin=LB95, ymax=UB95, fill = "95% C.I."), linetype=2, alpha=0.1) +
+    #geom_ribbon(aes(ymin=LB80, ymax=UB80, fill = "80% C.I."), linetype=2, alpha=0.1) +
+    geom_line(aes(y = trend, color = "trend"), size = 0.8, linetype = "dashed") +
+    ylab( "1000 tonnes") +
+    # Add  projections
+    geom_line(aes(y = WT, color = "Working Together"), size = 0.8, linetype = "dashed") +
+    geom_line(aes(y = NF, color = "Nations First" ), size = 0.8, linetype = "dashed") +
+    geom_line(aes(y = GLOBIOM, color = "GLOBIOM"), size = 0.8, linetype = "dashed") +
+    geom_line(aes(y = GTEM, color = "GTEM-Food"), size = 1, linetype = "solid") +
+
+    # This changes the height of the line symbols
+    guides(colour = guide_legend(override.aes = list(size=1))) +
+    scale_colour_manual(name= "" ,values=colores) +
+    scale_fill_manual(name="",values=cis) +
+    # annotate("text", label = as.character(round(df_shares$LB80[t]), 0),
+    #          x = tF + 2, y = df_shares$LB80[t], size = 3, colour = "grey20") +
+    # annotate("text", label = as.character(round(df_shares$UB80[t]), 0),
+    #          x = tF + 2, y = df_shares$UB80[t], size = 3, colour = "grey20") +
+    # annotate("text", label = as.character(round(df_shares$LB95[t]), 0),
+    #          x = tF + 2, y = df_shares$LB95[t], size = 3, colour = "grey20") +
+    # annotate("text", label = as.character(round(df_shares$UB95[t]), 0),
+    #          x = tF + 2, y = df_shares$UB95[t], size = 3, colour = "grey20") +
+    # annotate("text", label = as.character(round(df_shares$trend[t]), 0),
+    #          x = tF + 2, y = df_shares$trend[t], size = 3, colour = "grey20") +
+    theme_clean() +
+    theme(legend.position = "bottom",
+          legend.box = "horizontal",
+          legend.background = element_rect(color = NA),
+          plot.background =  element_blank()) +
+    labs(title = paste("ANO:", comID.ANO, "- Historical:",
+                       comID.hist, "- GTEM-Food:", comID.GTEM, sep = " "),
+         subtitle = "1990 - 2060",
+         caption = "GTEM-Food")
+
+  graph = ggplotly(comPlot)
+
+  return(graph)
+
+}
+
+
+
+
+# Historical classes
+# [1] "barley"         "Bean dried"     "Chick peas"     "Corn"           "Cotton"
+# [6] "Groundnuts"     "Millets"        "Potatoes"       "Rapeseeds"      "Rice"
+# [11] "Soybeans"       "Sorghum"        "Sugar cane"     "Sunflower"      "Sweet potatoes"
+# [16] "Wheat"          "BVMEAT"         "SGMEAT"         "PGMEAT"         "PTMEAT"
+# [21] "ALMILK"         "PTEGGS"
+
+# ANO
+# "Pota"  "SGMEAT"  "Sunf"   "OPAL"   "ALMILK"   "Rice"  "Srgh"   "FW_Biomass"
+# "Cott", "ChkP"   "Gnut" "SwPo"  "PGMEAT" "Mill"  "Soya" "Barl" "Sawnwood" "OW_Biomass"
+# "Corn"  "Whea"  "Fiberboard" "Rape" "SugC" "IP_Biomass" "BeaD"  "PTEGGS"  "PTMEAT"
+# "PW_Biomass"   "MechPulp"  "Plywood"  "Cass"  "ChemPulp"   "SW_Biomass"   "BVMEAT"
+
+# Globiom classes (subset) TSame ids as ANO
+# [1] "Barl"   "BeaD"   "ChkP"   "Corn"   "Cott"   "Gnut"   "Mill"
+# [8] "Pota"   "Rape"   "Rice"   "Soya"   "Srgh"   "SugC"   "Sunf"
+# [15] "SwPo"   "Whea"   "BVMEAT" "SGMEAT" "PGMEAT" "PTMEAT" "ALMILK"
+# [22] "PTEGGS"
+
+# GTEM classes
+
+# [1] "1 Land"          "2 Labour"        "3 Capital"       "4 NatlRes"       "5 Rice"          "6 Wheat"
+# [7] "7 Oth_grains"    "8 Veg_fruit"     "9 Oil_seeds"     "10 Cane_beet"    "11 Fibres_crops" "12 Oth_crops"
+# [13] "13 Live_cattle"  "14 Live_pig"     "15 Live_poultry" "16 Raw_milk"     "17 Meat_cattle"  "18 Meat_pork"
+# [19] "19 Meat_poultry" "20 Fishery"      "21 Wool"         "22 Forestry"     "23 Veg_oils"     "24 Dairy_milk"
+# [25] "25 Proc_rice"    "26 Sugar"        "27 Oth_foods"    "28 Beve_tobacco" "29 Farm_Forest"  "30 COL"
+# [31] "31 OIL"          "32 GAS"          "33 P_C"          "34 ELY"          "35 I_S"          "36 OTP"
+# [37] "37 Oth_trans"    "38 Ene_Intens"   "39 Machi_equip"  "40 Services"     "41 oxt"          "42 chm"
+# [43] "43 wtr"          "44 CGDS"
+
+
+# Crops
+# rice = gtem.Pn.chart(comID.ANO = "Rice", comID.hist = "Rice", comID.GTEM = "5 Rice", sm.factor = 0.01)
+# wheat = gtem.Pn.chart(comID.ANO = "Whea", comID.hist = "Wheat", comID.GTEM = "6 Wheat" , sm.factor = 0.01)
+# sugar = gtem.Pn.chart(comID.ANO = "SugC" , comID.hist = "Sugar cane" , comID.GTEM = "10 Cane_beet"  , sm.factor = 0.01)
+
+
+# Livestock
+# gtem.Pn.chart(comID.ANO = "BVMEAT", comID.hist = "BVMEAT", comID.GTEM = "17 Meat_cattle", sm.factor =0.4)
+# gtem.Pn.chart(comID.ANO = "PGMEAT", comID.hist = "PGMEAT", comID.GTEM = "18 Meat_pork" , sm.factor =0.4)
+# gtem.Pn.chart(comID.ANO = "PTMEAT", comID.hist = "PTMEAT", comID.GTEM = "19 Meat_poultry" , sm.factor =0.4)
+gtem.Pn.chart(comID.ANO = "ALMILK", comID.hist = "ALMILK", comID.GTEM = "24 Dairy_milk" , sm.factor =0.4)
+```
+
+### Comparison of GTEM-Food AU projections with other models
+Comparison of selected commodities with historical data, ANO 2019,  GLOBIOM, and time-series projections.
+
+Time series projections are based on exponential smoothing time series models.
+
+***Rice*** 
+
+```{r echo=FALSE}
+gtem.Pn.chart(comID.ANO = "Rice", comID.hist = "Rice", comID.GTEM = "5 Rice", sm.factor = 0.01)
+
+```
+*Note: The title indicates the commodity labels used in the compared models*
+
+***Wheat*** 
+
+```{r echo=FALSE}
+gtem.Pn.chart(comID.ANO = "Whea", comID.hist = "Wheat", comID.GTEM = "6 Wheat" , sm.factor = 0.01)
+```
+
+***Sugar*** 
+
+```{r echo=FALSE}
+gtem.Pn.chart(comID.ANO = "SugC" , comID.hist = "Sugar cane" , comID.GTEM = "10 Cane_beet"  , sm.factor = 0.01)
+```
+
+
+***Beef*** 
+
+```{r echo=FALSE}
+gtem.Pn.chart(comID.ANO = "BVMEAT", comID.hist = "BVMEAT", comID.GTEM = "17 Meat_cattle", sm.factor =0.4)
+```
+
+
+
+***Pork*** 
+
+```{r echo=FALSE}
+gtem.Pn.chart(comID.ANO = "PGMEAT", comID.hist = "PGMEAT", comID.GTEM = "18 Meat_pork" , sm.factor =0.4)
+```
+
+
+***Poultry*** 
+
+```{r echo=FALSE}
+gtem.Pn.chart(comID.ANO = "PTMEAT", comID.hist = "PTMEAT", comID.GTEM = "19 Meat_poultry" , sm.factor =0.4)
+```
+
+
+***Dairy*** 
+
+```{r echo=FALSE}
+gtem.Pn.chart(comID.ANO = "ALMILK", comID.hist = "ALMILK", comID.GTEM = "24 Dairy_milk" , sm.factor =0.4)
+```
+
+
