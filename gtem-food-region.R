@@ -264,7 +264,9 @@ par(mfrow=c(3,3), cex = 0.6)
 #------------------------------------------------------------------------
 # Beef production
 
-fmat = t(as.matrix(pn[pn$lu == "BVMEAT",]))
+comID = "BVMEAT"
+
+fmat = t(as.matrix(pn[pn$lu == comID,]))
 colnames(fmat) = fmat["ghg",] # name of multiple GLOBIOM projections
 
 # Get median value over SSP2 projections from GLOBIOM data
@@ -273,6 +275,10 @@ fmat.rep = (as.data.frame(fmat[4:74, 1:96]))
 fmat.rep[] <- lapply(fmat.rep, function(x) as.numeric(as.character(x)))
 # fmat.rep = rowMeans(fmat.rep, na.rm = T)
 fmat.rep = rowMedians(as.matrix(fmat.rep))
+
+
+
+
 
 par(mar = c(4,4,1,0))
 # matplot(fmat[4:74, 1:96], type = "l", ylab = " ",  xlab = " ",
@@ -288,28 +294,30 @@ axis(1, at = seq(0,71,10), labels = seq(1990,2060,10), cex.axis = 0.7)
 axis(2, at = seq(0,3000,500), labels = seq(0,3000,500), cex.axis = 0.7)
 
 # historical
-lines(as.numeric(histpn["BVMEAT",]), col = "black", lty = 3, lwd = 2)
+lines(as.numeric(histpn[comID,]), col = "black", lty = 3, lwd = 2)
 
 #WT
-wt_meat = worktog[worktog$ParameterName == "BVMEAT",]
+wt_meat = worktog[worktog$ParameterName == comID,]
 wt_meat_pn = as.numeric(wt_meat[wt_meat$ParameterType == "PROD", 5:75])
 lines(wt_meat_pn, col = "#6666FF", lty = 1, lwd = 2 )
 # NF
-nf_meat = nat_first[nat_first$ParameterName == "BVMEAT",]
+nf_meat = nat_first[nat_first$ParameterName == comID,]
 nf_meat_pn = as.numeric(nf_meat[nf_meat$ParameterType == "PROD", 5:75])
 
 lines(nf_meat_pn, col = "#C00000", lty = 1, lwd = 2 )
 
 # GTEM
-gtem.beef = gtem.output[gtem.output$item == "17 Meat_cattle",]
-tmp =  as.data.frame(c(rep(NA, 2015-1990), gtem.beef$value))
+getm.com = gtem.output[gtem.output$item == "17 Meat_cattle",]
+tmp =  as.data.frame(c(rep(NA, 2015-1990), getm.com$value))
 # Multiply the index by the average of historical FAOSTAT data
 
-beef.base = mean(as.numeric(histpn["BVMEAT", c("X2010", "X2011","X2012", "X2013", "X2014")]))
+base.com = mean(as.numeric(histpn[comID, c("X2010", "X2011","X2012", "X2013", "X2014")]))
 # tmp$year = 1990:2060
-beef.proj = beef.base * tmp/100
+gtem.proj.pn = base.com * tmp/100
+colnames(gtem.proj.pn) = "GTEM"
+gtem.proj.pn[25,1] = base.com
 
-lines(beef.proj, col = "orange", lty = 1, lwd = 2 )
+lines(gtem.proj.pn, col = "orange", lty = 1, lwd = 2 )
 
 # legend("bottomright", legend = c("Historical", "GLOBIOM"), col= c("#2DCBD3","#72CC98" ), 
 #        lty = c(2,1), bty = "n") # optional legend
@@ -318,12 +326,98 @@ title(main = "a) Beef output", ylab = "1000 tons",  xlab = " ", cex=0.9 )
 
 
 
+444444444444444444444
+
+# Add historical trend analysis 
+
+jf = 0.2
+#Smoothen the time series data to improve the analysis of long term trends
+sm = lowess(x =  1990:2014, y = as.numeric(histpn[comID,1:25]), f = jf)
+# Format data as time series 
+ax = ts(sm$y, start = 1990, end = 2014, frequency = 1)
+# Fit a ETS model to the time series
+ax.fit = ets(ax, damped = T)
+# Project using the fitted model
+ax.proj = as.data.frame(forecast.ets(ax.fit, h = 46))
+
+# merge historical and projected data
+
+tF = 2060 # Final year
+tI = 2014 # initial year 
+
+# save the  point forecasts, bounds and fitted data
+t = tF - 1990 + 1
+df_shares = data.frame(matrix(vector(), t , 8))
+colnames(df_shares) =c("historical", "fitted", "LB80", "LB95", "trend", "UB80", "UB95", "year")
+df_shares["year"] = 1990:tF
+df_shares[1:(t - (tF-tI)),"historical"] = as.numeric(histpn[comID,1:25])
+df_shares[1:(t - (tF-tI)),"fitted"] = as.numeric(fitted(ax.fit) )
+df_shares[(t - (tF - tI) + 1):t,"LB80"] = as.numeric(ax.proj[,"Lo 80"])
+df_shares[(t - (tF - tI) + 1):t,"LB95"] = as.numeric(ax.proj[,"Lo 95"])
+df_shares[(t - (tF - tI ) + 1):t,"trend"] = as.numeric( ax.proj[,"Point Forecast"])
+df_shares[(t - (tF - tI ) + 1):t,"UB80"] = as.numeric( ax.proj[,"Hi 80"])
+df_shares[(t - (tF - tI ) + 1):t,"UB95"] = as.numeric( ax.proj[,"Hi 95"])
+
+df_shares[df_shares < 0] = 0
+
+# Add the 2014 data to the projections to avoid a visual "gap"
+df_shares[(t - (tF - tI )), 3:7] =  as.numeric(df_shares[(t - (tF - tI )), 2])
+
+# Add ANO and globiom projections to the data
+df_shares$WT = wt_meat_pn
+df_shares$NF = nf_meat_pn
+df_shares$GTEM = gtem.proj.pn$GTEM
+
+
+# map colors to create separate legends
+colores <- c("historical"="black","fitted"="Orange","trend"="Blue", 
+             "95% C.I." = "#FFE5E5", "80% C.I." = "#E5CEE8",
+             "Working Together" = "#4a1486", 
+             "Nations First" = "#225ea8", 
+             "GTEM Food" = "#c51b8a")
+cis <- c("80% C.I."="blue","95% C.I."="red")
+
+# Plot
+ comPlot = ggplot(data=df_shares, aes(x=year)) + 
+  geom_line(aes(y=historical, color = "historical"), size = 0.8) +
+  scale_x_continuous(breaks=c(seq(1990,tF, 10))) +
+  scale_y_continuous(labels=function(x) format(x, big.mark = ",", scientific = FALSE)) +
+  geom_line(aes(y = fitted, color = "fitted"), size = 0.8, linetype = "dashed") +
+  geom_ribbon(aes(ymin=LB95, ymax=UB95, fill = "95% C.I."), linetype=2, alpha=0.1) + 
+  geom_ribbon(aes(ymin=LB80, ymax=UB80, fill = "80% C.I."), linetype=2, alpha=0.1) + 
+  geom_line(aes(y = trend, color = "trend"), size = 0.8, linetype = "dashed") +
+  ylab( "1000 tonnes") + 
+  # Add  projections
+   geom_line(aes(y = WT, color = "Working Together"), size = 0.8, linetype = "dashed") + 
+   geom_line(aes(y = NF, color = "Nations First" ), size = 0.8, linetype = "dashed") +  
+   geom_line(aes(y = GTEM, color = "GTEM Food"), size = 1, linetype = "solid") +  
+   
+  # This changes the height of the line symbols
+  guides(colour = guide_legend(override.aes = list(size=1))) + 
+  scale_colour_manual(name= "" ,values=colores) +
+  scale_fill_manual(name="",values=cis) +
+  annotate("text", label = as.character(round(df_shares$LB80[t]), 0), 
+           x = tF + 2, y = df_shares$LB80[t], size = 3, colour = "grey20") +
+  annotate("text", label = as.character(round(df_shares$UB80[t]), 0), 
+           x = tF + 2, y = df_shares$UB80[t], size = 3, colour = "grey20") +
+  annotate("text", label = as.character(round(df_shares$LB95[t]), 0), 
+           x = tF + 2, y = df_shares$LB95[t], size = 3, colour = "grey20") +
+  annotate("text", label = as.character(round(df_shares$UB95[t]), 0), 
+           x = tF + 2, y = df_shares$UB95[t], size = 3, colour = "grey20") +
+  annotate("text", label = as.character(round(df_shares$trend[t]), 0), 
+           x = tF + 2, y = df_shares$trend[t], size = 3, colour = "grey20") +
+  theme_clean() +
+  theme(legend.position = "bottom",
+        legend.box = "horizontal",
+        legend.background = element_rect(color = NA),
+        plot.background =  element_blank()) +
+  labs(title = comID,
+       subtitle = "1990 - 2060",
+       caption = "GTEM-Food")
 
 
 
-
-
-
+4444444444444444444444
 
 #------------------------------------------------------------------------
 # Meat_pork production
@@ -424,7 +518,7 @@ title(main = "c) Dairy output", ylab = " ",  xlab = " ", cex=0.9 )
 
 
 
-fmat = t(as.matrix(prices[prices$lu == "BVMEAT",]))
+fmat = t(as.matrix(prices[prices$lu == comID,]))
 
 colnames(fmat) = fmat["ghg",]
 
@@ -451,23 +545,23 @@ plot(fmat.rep, type = "l", ylab = " ",  xlab = " ",
 axis(1, at = seq(0,71,10), labels = seq(1990,2060,10), cex.axis = 0.7)
 axis(2, at = seq(0,3000,500), labels = seq(0,3000,500), cex.axis = 0.7)
 
-lines(as.numeric(histpric["BVMEAT",]), col = "black", lty = 3, lwd = 2 )
+lines(as.numeric(histpric[comID,]), col = "black", lty = 3, lwd = 2 )
 
-wt_meat = worktog[worktog$ParameterName == "BVMEAT",]
+wt_meat = worktog[worktog$ParameterName == comID,]
 wt_meat_pr = as.numeric(wt_meat[wt_meat$ParameterType == "XPRP", 5:75])
 
-nf_meat = nat_first[nat_first$ParameterName == "BVMEAT",]
+nf_meat = nat_first[nat_first$ParameterName == comID,]
 nf_meat_pr = (nf_meat[nf_meat$ParameterType == "XPRP", 5:75])
 
 lines(nf_meat_pr, col = "#C00000", lty = 1, lwd = 2 )
 lines(wt_meat_pr, col = "#6666FF", lty = 1, lwd = 2 )
 
 #GTEM
-gtem.beef.price = as.numeric(gtem.prices[gtem.prices$item == "17 Meat_cattle", 32:dim(gtem.prices)[2]])
+getm.com.price = as.numeric(gtem.prices[gtem.prices$item == "17 Meat_cattle", 32:dim(gtem.prices)[2]])
 
-gtem.beef.price  = 1452.81 + gtem.beef.price * 1452.81/100 # 1452.81 is the beef price in 2014 from FAOSTAT
+getm.com.price  = 1452.81 + getm.com.price * 1452.81/100 # 1452.81 is the beef price in 2014 from FAOSTAT
 
-lines(gtem.beef.price, col = "orange", lty = 1, lwd = 2 )
+lines(getm.com.price, col = "orange", lty = 1, lwd = 2 )
 
 # legend("bottomright", legend = c("Historical", "GLOBIOM"), col= c("#2DCBD3","#72CC98" ), 
 #        lty = c(2,1), bty = "n") # optional legend
