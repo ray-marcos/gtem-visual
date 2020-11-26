@@ -12,7 +12,12 @@ x =  c("readxl", "data.table")
 
 lapply(x, library, character.only = TRUE);
 
-setwd("C:/Users/mar77v/CSIRO/ABARES CSIRO Modeling - Visualization/gtem-visual")
+# old data
+setwd("C:/Users/mar77v/CSIRO/ABARES CSIRO Modeling - Visualization/gtem-visual") 
+
+# Data Nov 19
+setwd("C:/Users/mar77v/CSIRO/ABARES CSIRO Modeling - Visualization/results_nov") 
+
 
 # Clear workspace
 rm(list=ls())
@@ -53,14 +58,23 @@ cpi = read.csv("CPI.csv")
 cpi[,2:dim(cpi)[2]] =  (cpi[,2:dim(cpi)[2]] - 1) * 100
 
 # select five-year data
-cpi5y = subset(cpi, select = c("L_CPI", "X2.year2015", "X7.year2020", 
-                                "X12.year2025", "X17.year2030",
-                                "X22.year2035", "X27.year2040", 
-                                "X32.year2045", "X37.year2050", 
-                                "X42.year2055", "X47.year2060"))
+# cpi5y = subset(cpi, select = c("L_CPI", "X2.year2015", "X7.year2020", 
+#                                 "X12.year2025", "X17.year2030",
+#                                 "X22.year2035", "X27.year2040", 
+#                                 "X32.year2045", "X37.year2050", 
+#                                 "X42.year2055", "X47.year2060"))
 
+# select five-year data
+cpi5y = subset(cpi, select = c("L_CPI", "X2015", "X2020", 
+                               "X2025", "X2030",
+                               "X2035", "X2040", 
+                               "X2045", "X2050", 
+                               "X2055", "X2060"))
+
+# -----------------------------------------------------------------------------
 # Select country data and transpose it
   cpi_region = cpi5y[cpi5y$L_CPI == "1 Australia", ]
+#-----------------------------------------------------------------------------
 # make the data the same lenght as the price index data
   cpi_region = cpi_region[rep(row.names(cpi_region), 
                                        dim(prices)[1]),]
@@ -89,7 +103,7 @@ cpi5y = subset(cpi, select = c("L_CPI", "X2.year2015", "X7.year2020",
          value=c(unlist(Map(const_rate, N, r, tt)), tail(P, 1L)))
   }
   
-Does not work due to neg vals
+# Does not work due to neg vals
 
   ## geometric interpolation for each item
   res <- prices.adj[, interp(year, value), by= item]
