@@ -9,6 +9,8 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+
 ## Intro
 
 The Global Trade and Environmental Model (GTEM) is a dynamic global general equilibrium model with the capability to address total, sectoral, spatial, and temporal efficiency of resource allocation. GTEM captures the impact of policy changes on large numbers of economic variables in all sectors of the economy, including gross domestic product, prices, consumption, production, trade, investment, efficiency, competitiveness, and greenhouse gases. GTEM has been used to analyse a range of issues such as the climate mitigation policies under the Kyoto Protocol and Paris Agreement, trade reform under the World Trade Organisation, and trends and issues in international commodity and energy markets.
